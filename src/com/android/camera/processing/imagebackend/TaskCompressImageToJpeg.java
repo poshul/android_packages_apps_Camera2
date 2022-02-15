@@ -39,6 +39,7 @@ import com.google.common.base.Optional;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.MoreExecutors;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
@@ -95,8 +96,7 @@ public class TaskCompressImageToJpeg extends TaskJpegEncode {
      */
     public Map<Integer, Integer> exifGetMinimalTags(ExifInterface exif) {
         Map<Integer, Integer> map = new HashMap<>();
-        map.put(ExifInterface.TAG_ORIENTATION,
-                ExifInterface.getRotationForOrientationValue((short) Exif.getOrientation(exif)));
+        map.put(ExifInterface.TAG_ORIENTATION, Exif.getOrientation(exif));
         map.put(ExifInterface.TAG_PIXEL_X_DIMENSION, exif.getTagIntValue(
                 ExifInterface.TAG_PIXEL_X_DIMENSION));
         map.put(ExifInterface.TAG_PIXEL_Y_DIMENSION, exif.getTagIntValue(
@@ -355,7 +355,7 @@ public class TaskCompressImageToJpeg extends TaskJpegEncode {
             @Override
             public void onFailure(Throwable throwable) {
             }
-        });
+        }, MoreExecutors.directExecutor());
 
         final ListenableFuture<TotalCaptureResultProxy> requestMetadata = img.metadata;
         // If TotalCaptureResults are available add them to the capture event.
