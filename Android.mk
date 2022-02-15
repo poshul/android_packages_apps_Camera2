@@ -33,10 +33,12 @@ LOCAL_AAPT_FLAGS := \
 LOCAL_USE_AAPT2 := true
 
 LOCAL_PACKAGE_NAME := Camera2
+LOCAL_CERTIFICATE := platform
 
-LOCAL_SDK_VERSION := current
+LOCAL_PRIVATE_PLATFORM_APIS := true
+LOCAL_PRIVILEGED_MODULE := true
 
-LOCAL_PRODUCT_MODULE := true
+LOCAL_SYSTEM_EXT_MODULE := true
 
 LOCAL_PROGUARD_FLAG_FILES := proguard.flags
 
@@ -45,6 +47,17 @@ LOCAL_JAVA_LIBRARIES += org.apache.http.legacy
 
 LOCAL_JNI_SHARED_LIBRARIES := libjni_tinyplanet libjni_jpegutil
 
+LOCAL_REQUIRED_MODULES := privapp_whitelist_com.android.camera2.xml
+
 include $(BUILD_PACKAGE)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := privapp_whitelist_com.android.camera2.xml
+LOCAL_MODULE_CLASS := ETC
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_PATH := $(TARGET_OUT_SYSTEM_EXT_ETC)/permissions
+LOCAL_SYSTEM_EXT_MODULE := true
+LOCAL_SRC_FILES := $(LOCAL_MODULE)
+include $(BUILD_PREBUILT)
 
 include $(call all-makefiles-under, $(LOCAL_PATH))

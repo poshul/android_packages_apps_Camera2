@@ -16,10 +16,12 @@
 
 package com.android.camera.settings;
 
+import android.Manifest;
 import android.app.ActionBar;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
 import android.os.Bundle;
@@ -45,7 +47,6 @@ import com.android.camera.one.OneCameraModule;
 import com.android.camera.settings.PictureSizeLoader.PictureSizes;
 import com.android.camera.settings.SettingsUtil.SelectedVideoQualities;
 import com.android.camera.util.CameraSettingsActivityHelper;
-import com.android.camera.util.GoogleHelpHelper;
 import com.android.camera.util.Size;
 import com.android.camera2.R;
 import com.android.ex.camera2.portability.CameraAgentFactory;
@@ -69,6 +70,7 @@ public class CameraSettingsActivity extends FragmentActivity {
      */
     public static final String PREF_SCREEN_EXTRA = "pref_screen_extra";
     public static final String HIDE_ADVANCED_SCREEN = "hide_advanced";
+    private static final int PERMISSION_REQUEST_CODE = 1;
     private OneCameraManager mOneCameraManager;
 
     @Override
@@ -139,7 +141,6 @@ public class CameraSettingsActivity extends FragmentActivity {
 
         public static final String PREF_CATEGORY_RESOLUTION = "pref_category_resolution";
         public static final String PREF_CATEGORY_ADVANCED = "pref_category_advanced";
-        public static final String PREF_LAUNCH_HELP = "pref_launch_help";
         private static final Log.Tag TAG = new Log.Tag("SettingsFragment");
         private static DecimalFormat sMegaPixelFormat = new DecimalFormat("##0.0");
         private String[] mCamcorderProfileNames;
@@ -147,6 +148,7 @@ public class CameraSettingsActivity extends FragmentActivity {
         private String mPrefKey;
         private boolean mHideAdvancedScreen;
         private boolean mGetSubPrefAsRoot = true;
+        private boolean mPreferencesRemoved = false;
 
         // Selected resolutions for the different cameras and sizes.
         private PictureSizes mPictureSizes;
@@ -217,15 +219,6 @@ public class CameraSettingsActivity extends FragmentActivity {
                 setPreferenceScreenIntent(advancedScreen);
             }
 
-            Preference helpPref = findPreference(PREF_LAUNCH_HELP);
-            helpPref.setOnPreferenceClickListener(
-                    new OnPreferenceClickListener() {
-                        @Override
-                        public boolean onPreferenceClick(Preference preference) {
-                            new GoogleHelpHelper(activity).launchGoogleHelp();
-                            return true;
-                        }
-                    });
             getPreferenceScreen().getSharedPreferences()
                     .registerOnSharedPreferenceChangeListener(this);
         }
@@ -286,18 +279,19 @@ public class CameraSettingsActivity extends FragmentActivity {
         private void setVisibilities() {
             PreferenceGroup resolutions =
                     (PreferenceGroup) findPreference(PREF_CATEGORY_RESOLUTION);
-            if (mPictureSizes.backCameraSizes.isEmpty()) {
+            if (mPictureSizes.backCameraSizes.isEmpty() && !mPreferencesRemoved) {
                 recursiveDelete(resolutions,
                         findPreference(Keys.KEY_PICTURE_SIZE_BACK));
                 recursiveDelete(resolutions,
                         findPreference(Keys.KEY_VIDEO_QUALITY_BACK));
             }
-            if (mPictureSizes.frontCameraSizes.isEmpty()) {
+            if (mPictureSizes.frontCameraSizes.isEmpty() && !mPreferencesRemoved) {
                 recursiveDelete(resolutions,
                         findPreference(Keys.KEY_PICTURE_SIZE_FRONT));
                 recursiveDelete(resolutions,
                         findPreference(Keys.KEY_VIDEO_QUALITY_FRONT));
             }
+            mPreferencesRemoved = true;
         }
 
         /**
@@ -355,6 +349,15 @@ public class CameraSettingsActivity extends FragmentActivity {
         @Override
         public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
             setSummary(findPreference(key));
+            if (key.equals(Keys.KEY_RECORD_LOCATION)
+                    && sharedPreferences.getString(key, "0").equals("1")) {
+                Context context = this.getActivity().getApplicationContext();
+                if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[] {Manifest.permission.ACCESS_FINE_LOCATION},
+                        PERMISSION_REQUEST_CODE);
+                }
+            }
         }
 
         /**

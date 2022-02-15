@@ -22,6 +22,7 @@ import android.animation.Animator;
 import android.app.ActionBar;
 import android.app.Activity;
 import android.app.Dialog;
+import android.app.KeyguardManager.KeyguardDismissCallback;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
@@ -175,7 +176,8 @@ import java.util.List;
 
 public class CameraActivity extends QuickActivity
         implements AppController, CameraAgent.CameraOpenCallback,
-        ShareActionProvider.OnShareTargetSelectedListener {
+        ShareActionProvider.OnShareTargetSelectedListener,
+        SettingsManager.OnSettingChangedListener {
 
     private static final Log.Tag TAG = new Log.Tag("CameraActivity");
 
@@ -194,9 +196,6 @@ public class CameraActivity extends QuickActivity
     private static final long SCREEN_DELAY_MS = 2 * 60 * 1000; // 2 mins.
     /** Load metadata for 10 items ahead of our current. */
     private static final int FILMSTRIP_PRELOAD_AHEAD_ITEMS = 10;
-    private static final int PERMISSIONS_ACTIVITY_REQUEST_CODE = 1;
-    private static final int PERMISSIONS_RESULT_CODE_OK = 1;
-    private static final int PERMISSIONS_RESULT_CODE_FAILED = 2;
 
     /** Should be used wherever a context is needed. */
     private Context mAppContext;
@@ -294,6 +293,11 @@ public class CameraActivity extends QuickActivity
 
     /** First run dialog */
     private FirstRunDialog mFirstRunDialog;
+
+    // Keep track of powershutter state
+    public boolean mPowerShutter;
+    // Keep track of max brightness state
+    public boolean mMaxBrightness;
 
     @Override
     public CameraAppUI getCameraAppUI() {
@@ -565,6 +569,15 @@ public class CameraActivity extends QuickActivity
     public void onReconnectionFailure(CameraAgent mgr, String info) {
         Log.w(TAG, "Camera reconnection failure:" + info);
         mFatalErrorHandler.onCameraReconnectFailure();
+    }
+
+    @Override
+    public void onSettingChanged(SettingsManager settingsManager, String key) {
+        if (key.equals(Keys.KEY_POWER_SHUTTER)) {
+            initPowerShutter();
+        } else if (key.equals(Keys.KEY_MAX_BRIGHTNESS)) {
+            initMaxBrightness();
+        }
     }
 
     private static class MainHandler extends Handler {
@@ -850,6 +863,7 @@ public class CameraActivity extends QuickActivity
                 messageId > 0 ? getString(messageId) : "");
     }
 
+    // Candidate for deletion as Android Beam is deprecated in Android Q
     private void setupNfcBeamPush() {
         NfcAdapter adapter = NfcAdapter.getDefaultAdapter(mAppContext);
         if (adapter == null) {
@@ -1337,7 +1351,8 @@ public class CameraActivity extends QuickActivity
 
     private void removeItemAt(int index) {
         mDataAdapter.removeAt(index);
-        if (mDataAdapter.getTotalNumber() > 0) {
+        final int placeholders = mSecureCamera ? 1 : 0;
+        if (mDataAdapter.getTotalNumber() > placeholders) {
             showUndoDeletionBar();
         } else {
             // If camera preview is the only view left in filmstrip,
@@ -1498,6 +1513,11 @@ public class CameraActivity extends QuickActivity
 
         ModulesInfo.setupModules(mAppContext, mModuleManager, mFeatureConfig);
 
+        mSettingsManager.addListener(this);
+
+        initPowerShutter();
+        initMaxBrightness();
+
         AppUpgrader appUpgrader = new AppUpgrader(this);
         appUpgrader.upgrade(mSettingsManager);
 
@@ -1633,6 +1653,7 @@ public class CameraActivity extends QuickActivity
 
         preloadFilmstripItems();
 
+        // Candidate for deletion as Android Beam is deprecated in Android Q
         setupNfcBeamPush();
 
         mLocalImagesObserver = new FilmstripContentObserver();
@@ -1750,6 +1771,10 @@ public class CameraActivity extends QuickActivity
             Log.w(TAG, "Unable to get PackageInfo for callingPackage " + callingPackage);
         }
         if (packageInfo != null) {
+            if (packageInfo.requestedPermissions == null) {
+                // No-permissions at all, were requested by the calling app.
+                return true;
+            }
             for (int i = 0; i < packageInfo.requestedPermissions.length; i++) {
                 if (packageInfo.requestedPermissions[i].equals(
                         Manifest.permission.ACCESS_FINE_LOCATION) &&
@@ -1934,10 +1959,14 @@ public class CameraActivity extends QuickActivity
         } else {
             mHasCriticalPermissions = false;
         }
-
-        if ((checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-                !mSettingsManager.getBoolean(SettingsManager.SCOPE_GLOBAL, Keys.KEY_HAS_SEEN_PERMISSIONS_DIALOGS)) ||
-                !mHasCriticalPermissions) {
+        if (!mHasCriticalPermissions || (mSettingsManager.getBoolean(
+                SettingsManager.SCOPE_GLOBAL, Keys.KEY_RECORD_LOCATION) &&
+                (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                   != PackageManager.PERMISSION_GRANTED) &&
+                !mSettingsManager.getBoolean(SettingsManager.SCOPE_GLOBAL,
+                    Keys.KEY_HAS_SEEN_PERMISSIONS_DIALOGS))) {
+            // TODO: Convert PermissionsActivity into a dialog so we
+            // don't lose the state of CameraActivity.
             Intent intent = new Intent(this, PermissionsActivity.class);
             startActivity(intent);
             finish();
@@ -2244,9 +2273,39 @@ public class CameraActivity extends QuickActivity
         }
     }
 
+    protected void initPowerShutter() {
+        mPowerShutter = Keys.isPowerShutterOn(mSettingsManager);
+        if (mPowerShutter) {
+            getWindow().addPrivateFlags(
+                    WindowManager.LayoutParams.PRIVATE_FLAG_PREVENT_POWER_KEY);
+        } else {
+            getWindow().clearPrivateFlags(
+                    WindowManager.LayoutParams.PRIVATE_FLAG_PREVENT_POWER_KEY);
+        }
+    }
+
+    protected void initMaxBrightness() {
+        Window win = getWindow();
+        WindowManager.LayoutParams params = win.getAttributes();
+
+        mMaxBrightness = Keys.isMaxBrightnessOn(mSettingsManager);
+        if (mMaxBrightness) {
+            params.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL;
+        } else {
+            params.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        }
+
+        win.setAttributes(params);
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (!mFilmstripVisible) {
+            if (mPowerShutter && keyCode == KeyEvent.KEYCODE_POWER &&
+                    event.getRepeatCount() == 0) {
+                mCurrentModule.onShutterButtonFocus(true);
+                return true;
+            }
             if (mCurrentModule.onKeyDown(keyCode, event)) {
                 return true;
             }
@@ -2265,6 +2324,10 @@ public class CameraActivity extends QuickActivity
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (!mFilmstripVisible) {
+            if (mPowerShutter && keyCode == KeyEvent.KEYCODE_POWER) {
+                mCurrentModule.onShutterButtonClick();
+                return true;
+            }
             // If a module is in the middle of capture, it should
             // consume the key event.
             if (mCurrentModule.onKeyUp(keyCode, event)) {
@@ -2506,7 +2569,32 @@ public class CameraActivity extends QuickActivity
         UsageStatistics.instance().controlUsed(
                 eventprotos.ControlEvent.ControlType.OVERALL_SETTINGS);
         Intent intent = new Intent(this, CameraSettingsActivity.class);
-        startActivity(intent);
+        if (!isKeyguardLocked()) {
+            startActivity(intent);
+        } else {
+            /* Need to explicitly request keyguard dismissal for PIN/pattern
+             * entry to show up directly. */
+            requestDismissKeyguard(
+                /* requesting Activity: */ CameraActivity.this,
+                new KeyguardDismissCallback() {
+                    @Override
+                    public void onDismissSucceeded() {
+                        /* Need to use launchActivityByIntent() so that going
+                         * back from settings after unlock leads to main
+                         * activity instead of dismissing camera entirely. */
+                        launchActivityByIntent(intent);
+                    }
+                    @Override
+                    public void onDismissError() {
+                        Log.e(TAG, "Keyguard dismissal failed.");
+                    }
+                    @Override
+                    public void onDismissCancelled() {
+                        Log.d(TAG, "Keyguard dismissal canceled.");
+                    }
+                }
+            );
+        }
     }
 
     @Override
